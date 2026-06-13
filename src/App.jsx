@@ -892,19 +892,23 @@ const handleAdminUpdateStatus = async (taskId, newStatus) => {
       <div className="absolute top-1.5 left-1.5 bg-slate-950/80 backdrop-blur-sm text-[8px] font-black text-white px-2 py-0.5 rounded uppercase">Before</div>
     </div>
     
-    {/* กล่องรูป After */}
-    <div className="flex-1 relative aspect-[16/10] bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
-      {viewingTaskDetails.afterPhoto ? (
-        <>
-          <img src={viewingTaskDetails.afterPhoto} className="w-full h-full object-cover" alt="After" />
-          <div className="absolute top-1.5 left-1.5 bg-emerald-500 text-[8px] font-black text-white px-2 py-0.5 rounded uppercase">After</div>
-        </>
-      ) : (
-        <div className="text-center text-[10px] text-slate-500 flex flex-col items-center gap-1.5 p-2">
-          <Camera className="w-5 h-5 opacity-30" />
-          <span className="font-bold">รอรูปถ่าย After</span>
-        </div>
-      )}
+    {/* ส่วนของภาพ After */}
+<div className="flex-1 relative aspect-[16/10] ...">
+  {viewingTaskDetails && viewingTaskDetails.afterPhoto ? (
+    <>
+      <img 
+        src={viewingTaskDetails.afterPhoto} 
+        className="w-full h-full object-cover" 
+        alt="After" 
+      />
+      <div className="absolute top-1.5 left-1.5 bg-emerald-500 ...">After</div>
+    </>
+  ) : (
+    <div className="text-center ...">
+      <Camera className="w-5 h-5 opacity-30" />
+      <span className="font-bold">รอรูปถ่าย After</span>
+    </div>
+  )}
     </div>
   </div>
 </div>
