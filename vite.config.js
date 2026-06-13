@@ -3,18 +3,9 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  // เพิ่มบรรทัดนี้: ต้องเป็นชื่อเดียวกับ Repository ของคุณใน GitHub
+  base: '/hotel-management-system/', 
   build: {
-    // ปรับขนาดแจ้งเตือนให้มากขึ้นเพื่อไม่ให้กวนใจ
-    chunkSizeWarningLimit: 1000, 
-    rollupOptions: {
-      output: {
-        // แยกไลบรารีใหญ่ๆ ออกจากไฟล์หลัก
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            return 'vendor'; // แยกไฟล์จาก node_modules ไปไว้ที่ chunk ชื่อ vendor
-          }
-        }
-      }
-    }
+    chunkSizeWarningLimit: 1000,
   }
 });

@@ -844,7 +844,8 @@ const handleAdminUpdateStatus = async (taskId, newStatus) => {
                     className="bg-amber-600 text-[10px] text-white px-3 py-1.5 rounded-lg font-bold flex-1"
                   >
                     สั่งแก้งาน
-                  </button>
+                  </button> 
+
                 </div>
               )}
             </div>
@@ -881,7 +882,13 @@ const handleAdminUpdateStatus = async (taskId, newStatus) => {
   <div className="flex gap-2.5 mb-2">
     {/* กล่องรูป Before */}
     <div className="flex-1 relative aspect-[16/10] bg-slate-950 rounded-xl overflow-hidden border border-slate-800">
-      <img src={viewingTaskDetails.beforePhoto} className="w-full h-full object-cover" alt="Before" />
+      {viewingTaskDetails && (
+    <img 
+      src={viewingTaskDetails.beforePhoto} 
+      className="w-full h-full object-cover" 
+      alt="Before" 
+    />
+  )}
       <div className="absolute top-1.5 left-1.5 bg-slate-950/80 backdrop-blur-sm text-[8px] font-black text-white px-2 py-0.5 rounded uppercase">Before</div>
     </div>
     
