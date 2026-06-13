@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
+import imageCompression from 'browser-image-compression';
 import { 
   getAuth, 
   signInAnonymously, 
@@ -206,54 +207,62 @@ export default function App() {
   };
 
   // --- อัปโหลดภาพไปยังคลาวด์ของ Cloudinary พร้อมการจับข้อผิดพลาด 404 ---
-  const uploadImageToCloudinary = async (file) => {
-    if (!cloudinaryConfig.cloudName || !cloudinaryConfig.uploadPreset) {
-      // โหมดจำลองงานพรีเมียม (Premium Demo Mode)
-      return new Promise((resolve) => {
-        setIsUploading(true);
-        setTimeout(() => {
-          setIsUploading(false);
-          const urls = [
-            "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&q=80&w=600",
-            "https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?auto=format&fit=crop&q=80&w=600",
-            "https://images.unsplash.com/photo-1582719508461-905c673771fd?auto=format&fit=crop&q=80&w=600"
-          ];
-          const randomUrl = urls[Math.floor(Math.random() * urls.length)] + `?sig=${Date.now()}`;
-          resolve(randomUrl);
-          showToast("ส่งผลงานเรียบร้อยแล้ว (เปิดใช้งานโหมดจำลองรูปถ่ายพรีเมียม)", "success");
-        }, 1000);
-      });
-    }
+const uploadImageToCloudinary = async (file) => {
+  // หากไม่มี Config ให้ใช้โหมดจำลองตามเดิม
+  if (!cloudinaryConfig.cloudName || !cloudinaryConfig.uploadPreset) {
+    return new Promise((resolve) => {
+      setIsUploading(true);
+      setTimeout(() => {
+        setIsUploading(false);
+        const urls = [
+          "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&q=80&w=600",
+          "https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?auto=format&fit=crop&q=80&w=600",
+          "https://images.unsplash.com/photo-1582719508461-905c673771fd?auto=format&fit=crop&q=80&w=600"
+        ];
+        const randomUrl = urls[Math.floor(Math.random() * urls.length)] + `?sig=${Date.now()}`;
+        resolve(randomUrl);
+        showToast("ส่งผลงานเรียบร้อยแล้ว", "success");
+      }, 1000);
+    });
+  }
 
-    setIsUploading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('upload_preset', cloudinaryConfig.uploadPreset);
+  setIsUploading(true);
 
-    try {
-      const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryConfig.cloudName}/image/upload`, {
-        method: 'POST',
-        body: formData
-      });
+  // --- ส่วนบีบอัดภาพ ---
+  let fileToUpload = file;
+  try {
+    const options = {
+      maxSizeMB: 0.5,
+      maxWidthOrHeight: 1000,
+      useWebWorker: true,
+    };
+    fileToUpload = await imageCompression(file, options);
+  } catch (err) {
+    console.error("Compression failed, using original:", err);
+  }
 
-      if (!res.ok) {
-        // หากส่งกลับเป็น 404 หรือรหัสข้อผิดพลาดอื่นๆ
-        if (res.status === 404) {
-          throw new Error("ระบบตอบกลับรหัสข้อผิดพลาด 404: ไม่พบที่อยู่ Cloud Name หรือสิทธิ์ไม่ถูกต้อง");
-        }
-        throw new Error("เกิดข้อผิดพลาดในการเชื่อมโยงไฟล์ส่งรูปภาพ");
-      }
+  const formData = new FormData();
+  formData.append('file', fileToUpload); // ส่งไฟล์ที่บีบอัดแล้ว
+  formData.append('upload_preset', cloudinaryConfig.uploadPreset);
 
-      const data = await res.json();
-      setIsUploading(false);
-      return data.secure_url;
-    } catch (err) {
-      setIsUploading(false);
-      console.error("Cloudinary Upload Error Details:", err);
-      showToast("ข้อผิดพลาด 404 จากคลาวด์! กรุณาตรวจเช็คค่า Cloud Name หรือเปิดใช้ Unsigned Preset", "error");
-      return null;
-    }
-  };
+  try {
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryConfig.cloudName}/image/upload`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!res.ok) throw new Error("Upload failed");
+
+    const data = await res.json();
+    setIsUploading(false);
+    return data.secure_url;
+  } catch (err) {
+    setIsUploading(false);
+    console.error("Upload Error:", err);
+    showToast("อัปโหลดไม่สำเร็จ", "error");
+    return null;
+  }
+};
 
   // บันทึกค่าคอนฟิก Cloudinary ลงใน LocalStorage ของอุปกรณ์
   const saveSettings = (e) => {
@@ -263,84 +272,65 @@ export default function App() {
     showToast("บันทึกช่องทางเชื่อมต่อ Cloudinary แล้ว!", "success");
   };
 
-  // มอบหมายงานประจำวันเข้าสู่คลาวด์ (Supervisor)
-  const handleCreateTask = async (e) => {
-    e.preventDefault();
-    if (!newTaskTitle.trim()) {
-      showToast("กรุณาระบุชื่องานตรวจความสะอาด", "error");
-      return;
-    }
+  // 1. ปรับปรุงการสร้างงานให้เหลือภาพเดียว
+const handleCreateTask = async (e) => {
+  e.preventDefault();
+  if (!newTaskTitle.trim()) {
+    showToast("กรุณาระบุชื่องาน", "error");
+    return;
+  }
 
-    const updateTaskDate = async (taskId, newDate) => {
+  setIsUploading(true);
+  let beforeUrl = "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&q=80&w=600";
+
+  // บันทึกรูปเดียวเท่านั้น
+  if (beforeImageFile) {
+    const uploadedUrl = await uploadImageToCloudinary(beforeImageFile);
+    if (uploadedUrl) beforeUrl = uploadedUrl;
+  }
+
+  const now = new Date();
+  const payload = {
+    taskName: newTaskTitle,
+    assignee: newTaskAssignee === 'other' ? customAssignee : newTaskAssignee,
+    assigner: newTaskAssigner,
+    date: now.toISOString().split('T')[0],
+    timestamp: now.toLocaleString('th-TH', { hour12: false }),
+    beforePhoto: beforeUrl,
+    afterPhoto: "", 
+    status: "ค้าง", // เริ่มต้นเป็นค้าง
+    completedAt: ""
+  };
+
   try {
-    const taskRef = doc(db, "tasks", taskId);
-
-    await updateDoc(taskRef, {
-      dueDate: newDate,
-      updatedAt: new Date()
-    });
-
-    alert("อัปเดตวันที่เรียบร้อย");
-  } catch (error) {
-    console.error("Update Error:", error);
+    const tasksCol = collection(db, 'artifacts', appId, 'public', 'data', 'tasks');
+    await addDoc(tasksCol, payload);
+    
+    // รีเซ็ตค่า
+    setNewTaskTitle('');
+    setBeforeImageFile(null);
+    setShowAssignModal(false);
+    setIsUploading(false);
+    showToast("สร้างงานสำเร็จ!", "success");
+  } catch (err) {
+    setIsUploading(false);
+    showToast("เกิดข้อผิดพลาด", "error");
   }
 };
 
-    setIsUploading(true);
-    let beforeUrl = newTaskBeforeUrl;
-
-    if (beforeImageFile) {
-      const uploadedUrl = await uploadImageToCloudinary(beforeImageFile);
-      if (uploadedUrl) beforeUrl = uploadedUrl;
-    }
-
-    if (!beforeUrl) {
-      beforeUrl = "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&q=80&w=600";
-    }
-
-    let finalAssignee = newTaskAssignee === 'other' ? customAssignee.trim() : newTaskAssignee;
-    if (!finalAssignee) {
-      showToast("กรุณาระบุชื่อพนักงานผู้ดูแล", "error");
-      setIsUploading(false);
-      return;
-    }
-
-    // ลงทะเบียนรายชื่อพนักงานเข้าสู่ Firestore โดยอัตโนมัติหากพิมพ์ชื่อใหม่เอง
-    if (newTaskAssignee === 'other' && customAssignee.trim()) {
-      const name = customAssignee.trim();
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'staffs', name), { name });
-    }
-
-    const now = new Date();
-    const payload = {
-      taskName: newTaskTitle,
-      assignee: finalAssignee,
-      assigner: newTaskAssigner,
-      date: now.toISOString().split('T')[0],
-      timestamp: now.toLocaleString('th-TH', { hour12: false }),
-      beforePhoto: beforeUrl,
-      afterPhoto: "",
-      status: "ค้าง",
-      completedAt: ""
-    };
-
-    try {
-      const tasksCol = collection(db, 'artifacts', appId, 'public', 'data', 'tasks');
-      await addDoc(tasksCol, payload);
-      
-      setNewTaskTitle('');
-      setCustomAssignee('');
-      setNewTaskBeforeUrl('');
-      setBeforeImageFile(null);
-      setShowAssignModal(false);
-      setIsUploading(false);
-      showToast("กระจายงานเข้าสู่โทรศัพท์ของพนักงานสำเร็จ!", "success");
-    } catch (err) {
-      console.error(err);
-      setIsUploading(false);
-      showToast("ระบบขัดข้องในการสร้างรายการงาน", "error");
-    }
-  };
+// 2. ฟังก์ชันเปลี่ยนสถานะ (สำหรับหัวหน้างาน)
+const handleAdminUpdateStatus = async (taskId, newStatus) => {
+  try {
+    const taskDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'tasks', taskId);
+    await updateDoc(taskDocRef, { 
+      status: newStatus,
+      updatedAt: new Date().toLocaleString('th-TH')
+    });
+    showToast(`เปลี่ยนสถานะเป็น ${newStatus} แล้ว`, "success");
+  } catch (err) {
+    showToast("ไม่สามารถอัปเดตสถานะได้", "error");
+  }
+};
 
   // ลงทะเบียนรายชื่อพนักงานใหม่เข้าระบบ
   const handleAddStaff = async (e) => {
@@ -561,7 +551,7 @@ export default function App() {
               className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-xs font-bold transition-all bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-955 hover:opacity-95 shadow-xl shadow-amber-500/10 mt-3"
             >
               <Plus className="w-4 h-4 stroke-[3px]" />
-              สั่งงานตรวจห้องกะดึก
+              สั่งงานตรวจงาน
             </button>
           )}
 
@@ -771,143 +761,146 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: TASKS - รายการตรวจสอบภาพก่อนทำและหลังทำ */}
-          {activeTab === 'tasks' && (
-            <div className="space-y-4 animate-fade-in text-left">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg md:text-2xl font-black text-white tracking-wide">
-                    ประวัติและสถานะตรวจงานประจำวัน
-                  </h2>
-                  <p className="text-xs text-slate-400 font-medium">กดที่รายการการ์ดเพื่อเปรียบเทียบรูปถ่าย และเปิดกล้องส่งผลงาน</p>
-                </div>
+          
 
-                {selectedRole === 'Supervisor' && (
-                  <button 
-                    onClick={() => setShowAssignModal(true)}
-                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-[#070b16] rounded-xl font-bold text-xs"
-                  >
-                    <Plus className="w-3.5 h-3.5 stroke-[3px]" />
-                    สั่งงานด่วน
-                  </button>
-                )}
+          {/* TAB: TASKS - รายการตรวจสอบภาพก่อนทำและหลังทำ */}
+{activeTab === 'tasks' && (
+  <div className="space-y-4 animate-fade-in text-left">
+    {/* ส่วนหัวของแท็บ */}
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div>
+        <h2 className="text-lg md:text-2xl font-black text-white tracking-wide">
+          ประวัติและสถานะตรวจงานประจำวัน
+        </h2>
+        <p className="text-xs text-slate-400 font-medium">กดที่รายการการ์ดเพื่อเปรียบเทียบรูปถ่าย และเปิดกล้องส่งผลงาน</p>
+      </div>
+      {selectedRole === 'Supervisor' && (
+        <button 
+          onClick={() => setShowAssignModal(true)}
+          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-[#070b16] rounded-xl font-bold text-xs"
+        >
+          <Plus className="w-3.5 h-3.5 stroke-[3px]" />
+          สั่งงานด่วน
+        </button>
+      )}
+    </div>
+
+    {/* รายการการ์ดงาน */}
+    {tasks.length === 0 ? (
+      <div className="bg-[#070b16] p-12 text-center rounded-3xl border border-slate-800">
+        <Briefcase className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+        <h3 className="text-sm font-bold text-slate-300">ยังไม่มีงานที่สั่งในวันนี้</h3>
+      </div>
+    ) : (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {tasks.map((task) => {
+          const isCompleted = task.status === "เสร็จแล้ว";
+          return (
+            <div 
+              key={task.id}
+              onClick={() => {
+                setViewingTaskDetails(task);
+                setSliderPosition(50);
+              }}
+              className={`bg-[#070b16] rounded-3xl border transition-all duration-300 cursor-pointer p-4.5 flex flex-col justify-between hover:scale-[1.01] hover:border-slate-700 ${isCompleted ? 'border-emerald-500/20 bg-gradient-to-br from-[#070b16] to-[#041a13]' : 'border-slate-800/80'}`}
+            >
+              <div>
+                <div className="flex items-start justify-between gap-2 mb-2.5">
+                  <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-amber-500" />
+                    {task.timestamp}
+                  </span>
+                  <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${isCompleted ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                    {isCompleted ? "สำเร็จเรียบร้อย" : "รอดำเนินการ"}
+                  </span>
+                </div>
+                <h3 className="text-sm font-extrabold text-white line-clamp-2 mb-3 tracking-wide">
+                  {task.taskName}
+                </h3>
               </div>
 
-              {tasks.length === 0 ? (
-                <div className="bg-[#070b16] p-12 text-center rounded-3xl border border-slate-800">
-                  <Briefcase className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-                  <h3 className="text-sm font-bold text-slate-300">ยังไม่มีงานที่สั่งในวันนี้</h3>
-                  <p className="text-xs text-slate-500 mt-1">เข้าสู่เมนู "สั่งงาน" หรือไปที่แท็บหัวหน้างานเพื่อมอบหมายห้อง</p>
+              <div className="grid grid-cols-2 gap-2 text-[11px] bg-slate-900/50 p-2.5 rounded-2xl border border-slate-900/80 mb-4">
+                <div>
+                  <span className="text-[8px] text-slate-500 block font-bold uppercase">พนักงานผู้รับผิดชอบ</span>
+                  <span className="font-extrabold text-amber-400 truncate block">{task.assignee}</span>
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {tasks.map((task) => {
-                    const isCompleted = task.status === "เสร็จแล้ว";
-                    return (
-                      <div 
-                        key={task.id}
-                        onClick={() => {
-                          setViewingTaskDetails(task);
-                          setSliderPosition(50);
-                        }}
-                        className={`bg-[#070b16] rounded-3xl border transition-all duration-300 cursor-pointer p-4.5 flex flex-col justify-between hover:scale-[1.01] hover:border-slate-700 ${isCompleted ? 'border-emerald-500/20 bg-gradient-to-br from-[#070b16] to-[#041a13]' : 'border-slate-800/80'}`}
-                      >
-                        <div>
-                          <div className="flex items-start justify-between gap-2 mb-2.5">
-                            <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
-                              <Calendar className="w-3.5 h-3.5 text-amber-500" />
-                              {task.timestamp}
-                            </span>
-                            <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${isCompleted ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
-                              {task.status === "เสร็จแล้ว" ? "สำเร็จเรียบร้อย" : "รอดำเนินการ"}
-                            </span>
-                          </div>
-                          <h3 className="text-sm font-extrabold text-white line-clamp-2 mb-3 tracking-wide">
-  {task.taskName}
-</h3>
-</div>
+                <div>
+                  <span className="text-[8px] text-slate-500 block font-bold uppercase">ผู้สั่งงาน</span>
+                  <span className="font-extrabold text-slate-300 truncate block">{task.assigner}</span>
+                </div>
+              </div>
 
-<div className="grid grid-cols-2 gap-2 text-[11px] bg-slate-900/50 p-2.5 rounded-2xl border border-slate-900/80 mb-4">
-  <div>
-    <span className="text-[8px] text-slate-500 block font-bold uppercase">
-      พนักงานผู้รับผิดชอบ
-    </span>
-    <span className="font-extrabold text-amber-400 truncate block">
-      {task.assignee}
-    </span>
-  </div>
-
-  <div>
-    <span className="text-[8px] text-slate-500 block font-bold uppercase">
-      ผู้สั่งงาน
-    </span>
-    <span className="font-extrabold text-slate-300 truncate block">
-      {task.assigner}
-    </span>
-  </div>
-</div>
-
-{/* Due Date */}
-<div className="bg-slate-900/40 p-2.5 rounded-2xl border border-slate-800 mb-4">
-  <span className="text-[8px] text-slate-500 block font-bold uppercase mb-1">
-    Due Date
-  </span>
-
-  <div className="flex gap-2">
-    <input
-      type="date"
-      defaultValue={task.dueDate || ""}
-      onClick={(e) => e.stopPropagation()}
-      onChange={(e) =>
-        setEditDates({
-          ...editDates,
-          [task.id]: e.target.value
-        })
-      }
-      className="flex-1 bg-[#070b16] border border-slate-700 rounded-xl px-2 py-1 text-xs text-white"
-    />
-
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        updateTaskDate(task.id, editDates[task.id]);
-      }}
-      className="px-3 py-1 rounded-xl bg-amber-500 text-black text-xs font-black"
-    >
-      Save
-    </button>
-  </div>
-</div>
-
-
-
-                        {/* กล่องพรีวิวรูป Before / After */}
-                        <div className="flex gap-2.5 mb-2">
-                          <div className="flex-1 relative aspect-[16/10] bg-slate-955 rounded-xl overflow-hidden border border-slate-900">
-                            <img src={task.beforePhoto} className="w-full h-full object-cover" />
-                            <div className="absolute top-1.5 left-1.5 bg-slate-950/80 backdrop-blur-sm text-[8px] font-black text-white px-2 py-0.5 rounded uppercase">Before</div>
-                          </div>
-                          <div className="flex-1 relative aspect-[16/10] bg-slate-955 rounded-xl overflow-hidden border border-slate-900 flex items-center justify-center">
-                            {task.afterPhoto ? (
-                              <>
-                                <img src={task.afterPhoto} className="w-full h-full object-cover" />
-                                <div className="absolute top-1.5 left-1.5 bg-emerald-500 text-[8px] font-black text-white px-2 py-0.5 rounded uppercase">After</div>
-                              </>
-                            ) : (
-                              <div className="text-center text-[10px] text-slate-500 flex flex-col items-center gap-1.5">
-                                <Camera className="w-5 h-5 opacity-30" />
-                                <span className="font-bold">รอรูปถ่าย After</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+              {/* ปุ่มจัดการสำหรับหัวหน้างาน */}
+              {selectedRole === 'Supervisor' && (
+                <div className="flex gap-2">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleAdminUpdateStatus(task.id, "เสร็จแล้ว"); }}
+                    className="bg-emerald-600 text-[10px] text-white px-3 py-1.5 rounded-lg font-bold flex-1"
+                  >
+                    อนุมัติงาน
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleAdminUpdateStatus(task.id, "ค้าง"); }}
+                    className="bg-amber-600 text-[10px] text-white px-3 py-1.5 rounded-lg font-bold flex-1"
+                  >
+                    สั่งแก้งาน
+                  </button>
                 </div>
               )}
             </div>
-          )}
+          );
+        })}
+      </div>
+    )}
+  </div>
+)}
+
+{/* ปุ่มเปลี่ยนสถานะสำหรับหัวหน้างาน */}
+{selectedRole === 'Supervisor' && (
+  <div className="flex gap-2 mt-2">
+    <button 
+      onClick={() => handleAdminUpdateStatus(task.id, "เสร็จแล้ว")}
+      className="bg-emerald-600 text-[10px] px-2 py-1 rounded"
+    >
+      อนุมัติงาน
+    </button>
+    <button 
+      onClick={() => handleAdminUpdateStatus(task.id, "ค้าง")}
+      className="bg-amber-600 text-[10px] px-2 py-1 rounded"
+    >
+      สั่งแก้งาน
+    </button>
+  </div>
+)}
+
+
+
+                     {/* ส่วนแสดงภาพเปรียบเทียบในรายละเอียดงาน */}
+<div className="mt-4">
+  <p className="text-[10px] text-slate-500 font-bold uppercase mb-2 tracking-widest">การเปรียบเทียบภาพถ่าย</p>
+  <div className="flex gap-2.5 mb-2">
+    {/* กล่องรูป Before */}
+    <div className="flex-1 relative aspect-[16/10] bg-slate-950 rounded-xl overflow-hidden border border-slate-800">
+      <img src={viewingTaskDetails.beforePhoto} className="w-full h-full object-cover" alt="Before" />
+      <div className="absolute top-1.5 left-1.5 bg-slate-950/80 backdrop-blur-sm text-[8px] font-black text-white px-2 py-0.5 rounded uppercase">Before</div>
+    </div>
+    
+    {/* กล่องรูป After */}
+    <div className="flex-1 relative aspect-[16/10] bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
+      {viewingTaskDetails.afterPhoto ? (
+        <>
+          <img src={viewingTaskDetails.afterPhoto} className="w-full h-full object-cover" alt="After" />
+          <div className="absolute top-1.5 left-1.5 bg-emerald-500 text-[8px] font-black text-white px-2 py-0.5 rounded uppercase">After</div>
+        </>
+      ) : (
+        <div className="text-center text-[10px] text-slate-500 flex flex-col items-center gap-1.5 p-2">
+          <Camera className="w-5 h-5 opacity-30" />
+          <span className="font-bold">รอรูปถ่าย After</span>
+        </div>
+      )}
+    </div>
+  </div>
+</div>
 
           {/* TAB: STAFF MANAGEMENT - เพิ่มหรือลบรายชื่อพนักงานกะทำงาน */}
           {activeTab === 'staff-mgmt' && (
